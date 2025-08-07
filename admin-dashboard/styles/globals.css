@@ -1,0 +1,147 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+/* Import Inter font */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+
+/* Global styles */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  color: #e2e8f0;
+  min-height: 100vh;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1e293b;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Custom animations */
+@keyframes shimmer {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: calc(200px + 100%) 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    #1e293b 0px,
+    #334155 40px,
+    #1e293b 80px
+  );
+  background-size: 200px;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* Glass morphism effect */
+.glass {
+  background: rgba(30, 41, 59, 0.7);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.glass-light {
+  background: rgba(248, 250, 252, 0.05);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #3b82f6, #22c55e, #f59e0b);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Hover effects */
+.hover-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+}
+
+/* Status indicators */
+.status-online {
+  @apply bg-green-500 animate-pulse;
+}
+
+.status-offline {
+  @apply bg-red-500;
+}
+
+.status-warning {
+  @apply bg-yellow-500 animate-pulse;
+}
+
+/* Chart containers */
+.chart-container {
+  @apply bg-dark-800/50 backdrop-blur-sm border border-dark-600 rounded-lg p-4;
+}
+
+/* Loading states */
+.loading-skeleton {
+  @apply animate-pulse bg-dark-700 rounded;
+}
+
+/* Responsive utilities */
+@media (max-width: 640px) {
+  .mobile-hidden {
+    display: none;
+  }
+}
+
+/* Focus styles */
+.focus-ring {
+  @apply focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-2 focus:ring-offset-dark-900;
+}
+
+/* BeeMind specific styles */
+.beemind-card {
+  @apply bg-dark-800/80 backdrop-blur-sm border border-dark-600 rounded-xl p-6 hover-lift;
+}
+
+.beemind-button {
+  @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 focus-ring;
+}
+
+.beemind-button-primary {
+  @apply beemind-button bg-accent-600 hover:bg-accent-700 text-white;
+}
+
+.beemind-button-secondary {
+  @apply beemind-button bg-dark-700 hover:bg-dark-600 text-dark-200 border border-dark-600;
+}
+
+.beemind-input {
+  @apply w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded-lg text-dark-100 placeholder-dark-400 focus-ring;
+}

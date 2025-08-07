@@ -1,0 +1,225 @@
+version: '3.8'
+
+services:
+  # BeeMind API Backend
+  beemind-api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: beemind-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - DATABASE_URL=postgresql://beemind:${DB_PASSWORD}@postgres:5432/beemind
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - CORS_ORIGINS=https://beemind.dev,https://www.beemind.dev
+    volumes:
+      - ./data/beemind:/app/data
+      - ./logs:/app/logs
+      - ./mlflow_runs:/app/mlflow_runs
+    depends_on:
+      - postgres
+      - redis
+      - mlflow
+    networks:
+      - beemind-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Next.js Dashboard Frontend
+  beemind-dashboard:
+    build:
+      context: ../admin-dashboard
+      dockerfile: Dockerfile.production
+    container_name: beemind-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=https://api.beemind.dev
+      - NEXTAUTH_URL=https://beemind.dev
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+    depends_on:
+      - beemind-api
+    networks:
+      - beemind-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: beemind-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=beemind
+      - POSTGRES_USER=beemind
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    networks:
+      - beemind-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U beemind -d beemind"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: beemind-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    networks:
+      - beemind-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MLFlow Tracking Server
+  mlflow:
+    image: python:3.11-slim
+    container_name: beemind-mlflow
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=postgresql://beemind:${DB_PASSWORD}@postgres:5432/mlflow
+      - MLFLOW_DEFAULT_ARTIFACT_ROOT=/mlflow/artifacts
+    volumes:
+      - mlflow_artifacts:/mlflow/artifacts
+      - ./mlflow-requirements.txt:/requirements.txt
+    command: >
+      sh -c "
+        pip install -r /requirements.txt &&
+        mlflow server 
+        --backend-store-uri postgresql://beemind:${DB_PASSWORD}@postgres:5432/mlflow
+        --default-artifact-root /mlflow/artifacts
+        --host 0.0.0.0
+        --port 5000
+      "
+    depends_on:
+      - postgres
+    networks:
+      - beemind-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: beemind-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./ssl:/etc/nginx/ssl
+      - /var/log/nginx:/var/log/nginx
+    depends_on:
+      - beemind-api
+      - beemind-dashboard
+    networks:
+      - beemind-network
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Certbot for SSL certificates
+  certbot:
+    image: certbot/certbot
+    container_name: beemind-certbot
+    volumes:
+      - ./ssl:/etc/letsencrypt
+      - ./nginx/html:/var/www/html
+    command: certonly --webroot --webroot-path=/var/www/html --email admin@beemind.dev --agree-tos --no-eff-email -d beemind.dev -d www.beemind.dev -d api.beemind.dev
+    depends_on:
+      - nginx
+    networks:
+      - beemind-network
+
+  # Monitoring with Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: beemind-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - beemind-network
+
+  # Grafana for Visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: beemind-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - beemind-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  mlflow_artifacts:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  beemind-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

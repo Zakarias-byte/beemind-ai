@@ -1,0 +1,62 @@
+🧠 BeeMind - Windsurf Agent TODO
+
+🎯 Hovedmål:
+Utvikle en intelligent agent som automatiserer utviklingen og forbedringen av BeeMind-plattformen.
+Agenten skal kunne generere, evaluere, koble sammen og validere alle moduler i AI-arkitekturen, inkludert:
+- Drone-generering (modellskaping)
+- Evaluering av modeller
+- Dronningens valg
+- HiveMemory-logging
+- FastAPI-backend
+- Docker-deploy
+- Admin-dashboard
+- Fremtidig: Blockchain-logging og MLFlow
+
+📋 TODO-liste for agenten:
+
+1. 📁 STRUKTUR & INITIALISERING
+   - Opprett korrekt mappe- og filstruktur for prosjektet
+   - Lag `main.py` med FastAPI-instans og `/generate`-endepunkt
+   - Lag `requirements.txt`, `Dockerfile` og `docker-compose.yml`
+
+2. 🤖 DRONE GENERATOR
+   - Opprett `drone_generator.py`
+   - Lag funksjon for å generere ulike ML-modeller med tilfeldige hyperparametere
+   - Returner modell + metadata
+
+3. 👷 WORKER EVALUATOR
+   - Opprett `worker_pool.py`
+   - Lag funksjon som evaluerer modellene (ROC AUC, F1)
+   - Returner resultater per drone
+
+4. 👑 QUEEN SELECTOR
+   - Opprett `queen.py`
+   - Velg beste drone basert på høyeste ROC AUC
+
+5. 🧠 HIVE MEMORY LOGGER
+   - Opprett `hivememory.py`
+   - Logg modelltype, hyperparametere, ROC AUC og F1-score til JSON-fil
+
+6. 🌐 FASTAPI BACKEND
+   - Lag `/generate`-endepunkt i `main.py`
+   - Hent inputdata → generer droner → evaluer → velg beste → returner resultater
+
+7. 🐳 DOCKERIZATION
+   - Generer `Dockerfile` og `docker-compose.yml`
+   - Sørg for riktig importstruktur og `PYTHONPATH`
+
+8. 🧪 TESTING
+   - Generer `test_payload.py` med POST-request til `/generate`
+   - Bruk dummydata (f.eks. Iris)
+
+9. 📊 DASHBOARD (kommende modul)
+   - Lag admin-dashboard struktur (Next.js + Tailwind)
+   - Visualiser ROC AUC, F1 og hive-logg
+
+10. 🔐 FREMTIDIGE TILTAK
+   - Legg til JWT-basert autentisering
+   - Legg til blockchain-modul for logging av modellbeslutninger
+   - Lag MLFlow-integrasjon for eksperimenthistorikk
+
+🛰️ Sluttmål:
+Agenten skal kunne bygge, teste og deployere BeeMind i full autonomi.

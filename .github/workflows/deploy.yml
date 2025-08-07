@@ -1,0 +1,134 @@
+name: Deploy BeeMind to Production
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_API: ${{ github.repository }}/beemind-api
+  IMAGE_NAME_DASHBOARD: ${{ github.repository }}/beemind-dashboard
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata for API
+      id: meta-api
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_API }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Extract metadata for Dashboard
+      id: meta-dashboard
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_DASHBOARD }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push API Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: ${{ steps.meta-api.outputs.tags }}
+        labels: ${{ steps.meta-api.outputs.labels }}
+
+    - name: Build and push Dashboard Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./admin-dashboard
+        file: ./admin-dashboard/Dockerfile.production
+        push: true
+        tags: ${{ steps.meta-dashboard.outputs.tags }}
+        labels: ${{ steps.meta-dashboard.outputs.labels }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Deploy to EC2
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          # Navigate to deployment directory
+          cd /opt/beemind
+          
+          # Pull latest code
+          git pull origin main
+          
+          # Update environment variables
+          source .env
+          
+          # Pull latest Docker images
+          docker-compose -f deployment/docker-compose.production.yml pull
+          
+          # Restart services with zero downtime
+          docker-compose -f deployment/docker-compose.production.yml up -d --remove-orphans
+          
+          # Clean up old images
+          docker image prune -f
+          
+          # Health check
+          sleep 30
+          curl -f https://beemind.dev/health || exit 1
+          curl -f https://api.beemind.dev/health || exit 1
+          
+          echo "✅ Deployment completed successfully!"
+
+  notify:
+    needs: [build, deploy]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Notify deployment status
+      run: |
+        if [ "${{ needs.deploy.result }}" == "success" ]; then
+          echo "🎉 BeeMind deployed successfully to https://beemind.dev"
+        else
+          echo "❌ Deployment failed"
+          exit 1
+        fi

@@ -1,0 +1,50 @@
+[Unit]
+Description=BeeMind AI Platform - Evolutionary AI System
+Documentation=https://github.com/Zakarias-byte/beemind-ai
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/beemind
+
+# Environment variables
+Environment=COMPOSE_PROJECT_NAME=beemind
+Environment=COMPOSE_FILE=deployment/docker-compose.production.yml
+
+# Start command
+ExecStart=/usr/local/bin/docker-compose -f deployment/docker-compose.production.yml up -d --remove-orphans
+
+# Stop command
+ExecStop=/usr/local/bin/docker-compose -f deployment/docker-compose.production.yml down
+
+# Reload command (for updates)
+ExecReload=/usr/local/bin/docker-compose -f deployment/docker-compose.production.yml up -d --remove-orphans
+
+# Health check
+ExecStartPost=/bin/bash -c 'sleep 30 && curl -f https://beemind.dev/health || exit 1'
+
+# Restart policy
+Restart=on-failure
+RestartSec=30
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/beemind
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=beemind
+
+[Install]
+WantedBy=multi-user.target
