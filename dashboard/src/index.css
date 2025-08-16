@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom base styles for BeeMind */
+@layer base {
+  body {
+    @apply bg-bee-darker text-white font-mono;
+    background-image: 
+      radial-gradient(circle at 20% 20%, rgba(0,191,255,0.05) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(138,43,226,0.05) 0%, transparent 50%),
+      radial-gradient(circle at 50% 50%, rgba(255,215,0,0.02) 0%, transparent 70%);
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-bee-dark;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-neural-blue rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-neural-purple;
+  }
+}
+
+/* Custom component styles */
+@layer components {
+  .bee-card {
+    @apply bg-bee-dark/50 backdrop-blur-sm border border-neural-blue/20 rounded-lg p-4;
+  }
+
+  .neural-glow {
+    @apply shadow-lg shadow-neural-blue/20;
+  }
+
+  .bee-button {
+    @apply bg-gradient-to-r from-neural-blue to-neural-purple text-white px-4 py-2 rounded-lg 
+           hover:from-neural-purple hover:to-neural-blue transition-all duration-300
+           focus:outline-none focus:ring-2 focus:ring-neural-blue/50;
+  }
+
+  .bee-input {
+    @apply bg-bee-dark border border-neural-blue/30 rounded-lg px-3 py-2 text-white
+           focus:outline-none focus:border-neural-blue focus:ring-1 focus:ring-neural-blue/50;
+  }
+
+  .status-indicator {
+    @apply inline-block w-3 h-3 rounded-full;
+  }
+
+  .status-active {
+    @apply bg-success-green animate-pulse;
+  }
+
+  .status-warning {
+    @apply bg-warning-orange animate-pulse;
+  }
+
+  .status-error {
+    @apply bg-threat-red animate-pulse;
+  }
+}
+
+/* Custom utilities */
+@layer utilities {
+  .text-glow {
+    text-shadow: 0 0 10px currentColor;
+  }
+
+  .neural-border {
+    border-image: linear-gradient(45deg, #00BFFF, #8A2BE2) 1;
+  }
+
+  .bee-gradient {
+    background: linear-gradient(135deg, #FFD700 0%, #FF8C00 100%);
+  }
+}
