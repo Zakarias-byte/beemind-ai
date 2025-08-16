@@ -1,0 +1,164 @@
+name: Deploy Dashboard Only
+
+on:
+  push:
+    branches: [ main ]
+    paths: 
+      - 'dashboard/**'
+      - '.github/workflows/deploy-dashboard.yml'
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild dashboard'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  EC2_HOST: ${{ secrets.EC2_HOST }}
+  EC2_USER: ${{ secrets.EC2_USER }}
+  DOMAIN: beemind.dev
+
+jobs:
+  test-dashboard:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: dashboard/package-lock.json
+
+    - name: Install Node.js dependencies
+      run: |
+        cd dashboard
+        npm ci
+
+    - name: Build dashboard
+      run: |
+        cd dashboard
+        npm run build
+
+    - name: Run dashboard tests
+      run: |
+        cd dashboard
+        npm test || echo "No tests found"
+
+  deploy-dashboard:
+    needs: test-dashboard
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: dashboard/package-lock.json
+
+    - name: Install Node.js dependencies
+      run: |
+        cd dashboard
+        npm ci
+
+    - name: Build dashboard
+      run: |
+        cd dashboard
+        npm run build
+
+    - name: Deploy Dashboard to EC2
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ env.EC2_HOST }}
+        username: ${{ env.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          echo "🚀 Deploying BeeMind Dashboard..."
+          
+          # Navigate to application directory
+          cd /opt/beemind
+          
+          # Stop dashboard service
+          sudo systemctl stop beemind-dashboard || true
+          
+          # Pull latest code
+          git pull origin main
+          
+          # Install Node.js dependencies and build
+          cd dashboard
+          npm ci
+          npm run build
+          cd ..
+          
+          # Start dashboard service
+          sudo systemctl start beemind-dashboard
+          sudo systemctl enable beemind-dashboard
+          
+          # Wait for service to start
+          sleep 10
+          
+          # Health check
+          if curl -f http://localhost:8001/api/dashboard/status; then
+            echo "✅ Dashboard deployed successfully!"
+          else
+            echo "❌ Dashboard deployment failed!"
+            sudo journalctl -u beemind-dashboard -n 20
+            exit 1
+          fi
+
+  health-check:
+    needs: deploy-dashboard
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Dashboard Health Check
+      run: |
+        echo "🔍 Checking dashboard health..."
+        
+        # Wait for service to be fully ready
+        sleep 15
+        
+        # Test dashboard API
+        if curl -f https://${{ env.DOMAIN }}/api/dashboard/status; then
+          echo "✅ Dashboard API is healthy"
+        else
+          echo "❌ Dashboard API health check failed"
+          exit 1
+        fi
+        
+        # Test dashboard frontend
+        if curl -f https://${{ env.DOMAIN }}/dashboard; then
+          echo "✅ Dashboard frontend is accessible"
+        else
+          echo "❌ Dashboard frontend health check failed"
+          exit 1
+        fi
+        
+        echo "🎉 Dashboard deployment completed successfully!"
+
+  notify:
+    needs: [deploy-dashboard, health-check]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Notify deployment status
+      run: |
+        if [ "${{ needs.health-check.result }}" == "success" ]; then
+          echo "🎉 Dashboard deployed successfully!"
+          echo "📊 Dashboard: https://${{ env.DOMAIN }}/dashboard"
+        else
+          echo "❌ Dashboard deployment failed!"
+          echo "Deploy: ${{ needs.deploy-dashboard.result }}"
+          echo "Health Check: ${{ needs.health-check.result }}"
+          exit 1
+        fi

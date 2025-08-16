@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { Code, Terminal, Play, Pause, RotateCcw } from 'lucide-react'
 import { useWebSocket } from '../contexts/WebSocketContext'
-import { useRef, useEffect, useState, useCallback } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { tomorrow } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
@@ -300,7 +300,7 @@ const optimizeModel = (model) => {
           className="h-full overflow-y-auto p-4 space-y-1"
         >
           <AnimatePresence>
-            {codeLines.map((line, index) => (
+                         {codeLines.map((line) => (
               <motion.div
                 key={line.id}
                 initial={{ opacity: 0, x: -20 }}
@@ -365,7 +365,7 @@ const optimizeModel = (model) => {
               transition={{ duration: 1, repeat: Infinity }}
               className="flex items-center space-x-2 mt-2"
             >
-              <span className="text-neural-blue text-xs">></span>
+                             <span className="text-neural-blue text-xs">{'>'}</span>
               <span className="text-neural-blue/80 text-sm">Waiting for next generation...</span>
             </motion.div>
           )}

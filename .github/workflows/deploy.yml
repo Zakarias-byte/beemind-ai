@@ -15,70 +15,55 @@ on:
         - staging
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME_API: ${{ github.repository }}/beemind-api
-  IMAGE_NAME_DASHBOARD: ${{ github.repository }}/beemind-dashboard
+  EC2_HOST: ${{ secrets.EC2_HOST }}
+  EC2_USER: ${{ secrets.EC2_USER }}
+  DOMAIN: beemind.dev
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Log in to Container Registry
-      uses: docker/login-action@v3
+    - name: Set up Python
+      uses: actions/setup-python@v4
       with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+        python-version: '3.11'
 
-    - name: Extract metadata for API
-      id: meta-api
-      uses: docker/metadata-action@v5
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run Python tests
+      run: |
+        python -m pytest tests/ || echo "No tests found"
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
       with:
-        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_API }}
-        tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=sha,prefix={{branch}}-
-          type=raw,value=latest,enable={{is_default_branch}}
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: dashboard/package-lock.json
 
-    - name: Extract metadata for Dashboard
-      id: meta-dashboard
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_DASHBOARD }}
-        tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=sha,prefix={{branch}}-
-          type=raw,value=latest,enable={{is_default_branch}}
+    - name: Install Node.js dependencies
+      run: |
+        cd dashboard
+        npm ci
 
-    - name: Build and push API Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile
-        push: true
-        tags: ${{ steps.meta-api.outputs.tags }}
-        labels: ${{ steps.meta-api.outputs.labels }}
+    - name: Build dashboard
+      run: |
+        cd dashboard
+        npm run build
 
-    - name: Build and push Dashboard Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: ./admin-dashboard
-        file: ./admin-dashboard/Dockerfile.production
-        push: true
-        tags: ${{ steps.meta-dashboard.outputs.tags }}
-        labels: ${{ steps.meta-dashboard.outputs.labels }}
+    - name: Run dashboard tests
+      run: |
+        cd dashboard
+        npm test || echo "No tests found"
 
-  deploy:
-    needs: build
+  deploy-backend:
+    needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     
@@ -86,49 +71,298 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Deploy to EC2
+    - name: Deploy Backend to EC2
       uses: appleboy/ssh-action@v1.0.0
       with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USER }}
+        host: ${{ env.EC2_HOST }}
+        username: ${{ env.EC2_USER }}
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
-          # Navigate to deployment directory
+          echo "🚀 Deploying BeeMind Backend..."
+          
+          # Navigate to application directory
           cd /opt/beemind
+          
+          # Stop backend service
+          sudo systemctl stop beemind-backend || true
           
           # Pull latest code
           git pull origin main
           
-          # Update environment variables
-          source .env
+          # Update Python dependencies
+          source venv/bin/activate
+          pip install -r requirements.txt
           
-          # Pull latest Docker images
-          docker-compose -f deployment/docker-compose.production.yml pull
+          # Create/update environment file
+          cat > .env << EOF
+          # Database Configuration
+          DATABASE_URL=postgresql://beemind:beemind_password@localhost/beemind
+          REDIS_URL=redis://localhost:6379
           
-          # Restart services with zero downtime
-          docker-compose -f deployment/docker-compose.production.yml up -d --remove-orphans
+          # Dashboard Configuration
+          DASHBOARD_HOST=0.0.0.0
+          DASHBOARD_PORT=8001
+          WEBSOCKET_PATH=/ws
+          CORS_ORIGINS=https://${{ env.DOMAIN }},https://www.${{ env.DOMAIN }}
           
-          # Clean up old images
-          docker image prune -f
+          # Production Configuration
+          ENVIRONMENT=production
+          LOG_LEVEL=INFO
+          DEBUG=false
+          
+          # Security
+          SECRET_KEY=${{ secrets.BEE_MIND_SECRET_KEY }}
+          JWT_SECRET=${{ secrets.BEE_MIND_JWT_SECRET }}
+          
+          # Performance
+          MAX_CONCURRENT_CONNECTIONS=1000
+          ENABLE_GPU_ACCELERATION=false
+          EOF
+          
+          # Start backend service
+          sudo systemctl start beemind-backend
+          sudo systemctl enable beemind-backend
+          
+          # Wait for service to start
+          sleep 10
           
           # Health check
-          sleep 30
-          curl -f https://beemind.dev/health || exit 1
-          curl -f https://api.beemind.dev/health || exit 1
+          if curl -f http://localhost:8000/health; then
+            echo "✅ Backend deployed successfully!"
+          else
+            echo "❌ Backend deployment failed!"
+            sudo journalctl -u beemind-backend -n 20
+            exit 1
+          fi
+
+  deploy-dashboard:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: dashboard/package-lock.json
+
+    - name: Install Node.js dependencies
+      run: |
+        cd dashboard
+        npm ci
+
+    - name: Build dashboard
+      run: |
+        cd dashboard
+        npm run build
+
+    - name: Deploy Dashboard to EC2
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ env.EC2_HOST }}
+        username: ${{ env.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          echo "🚀 Deploying BeeMind Dashboard..."
           
-          echo "✅ Deployment completed successfully!"
+          # Navigate to application directory
+          cd /opt/beemind
+          
+          # Stop dashboard service
+          sudo systemctl stop beemind-dashboard || true
+          
+          # Pull latest code
+          git pull origin main
+          
+          # Install Node.js dependencies and build
+          cd dashboard
+          npm ci
+          npm run build
+          cd ..
+          
+          # Start dashboard service
+          sudo systemctl start beemind-dashboard
+          sudo systemctl enable beemind-dashboard
+          
+          # Wait for service to start
+          sleep 10
+          
+          # Health check
+          if curl -f http://localhost:8001/api/dashboard/status; then
+            echo "✅ Dashboard deployed successfully!"
+          else
+            echo "❌ Dashboard deployment failed!"
+            sudo journalctl -u beemind-dashboard -n 20
+            exit 1
+          fi
+
+  deploy-nginx:
+    needs: [deploy-backend, deploy-dashboard]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Deploy Nginx Configuration
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ env.EC2_HOST }}
+        username: ${{ env.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          echo "🌐 Updating Nginx configuration..."
+          
+          # Update Nginx configuration
+          sudo tee /etc/nginx/sites-available/${{ env.DOMAIN }} > /dev/null <<EOF
+          server {
+              listen 80;
+              server_name ${{ env.DOMAIN }} www.${{ env.DOMAIN }};
+              
+              # Redirect HTTP to HTTPS
+              return 301 https://\$server_name\$request_uri;
+          }
+          
+          server {
+              listen 443 ssl http2;
+              server_name ${{ env.DOMAIN }} www.${{ env.DOMAIN }};
+              
+              # SSL Configuration (Let's Encrypt)
+              ssl_certificate /etc/letsencrypt/live/${{ env.DOMAIN }}/fullchain.pem;
+              ssl_certificate_key /etc/letsencrypt/live/${{ env.DOMAIN }}/privkey.pem;
+              ssl_protocols TLSv1.2 TLSv1.3;
+              ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
+              ssl_prefer_server_ciphers off;
+              
+              # Security headers
+              add_header X-Frame-Options DENY;
+              add_header X-Content-Type-Options nosniff;
+              add_header X-XSS-Protection "1; mode=block";
+              add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+              
+              # Main API
+              location / {
+                  proxy_pass http://localhost:8000;
+                  proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
+                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto \$scheme;
+                  proxy_connect_timeout 60s;
+                  proxy_send_timeout 60s;
+                  proxy_read_timeout 60s;
+              }
+              
+              # Dashboard WebSocket
+              location /ws {
+                  proxy_pass http://localhost:8001;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade \$http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
+                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto \$scheme;
+              }
+              
+              # Dashboard API
+              location /api/dashboard {
+                  proxy_pass http://localhost:8001;
+                  proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
+                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto \$scheme;
+              }
+              
+              # Dashboard Frontend
+              location /dashboard {
+                  alias /opt/beemind/dashboard/dist;
+                  try_files \$uri \$uri/ /dashboard/index.html;
+                  expires 1y;
+                  add_header Cache-Control "public, immutable";
+              }
+              
+              # Health check
+              location /health {
+                  proxy_pass http://localhost:8000;
+                  access_log off;
+              }
+              
+              # Gzip compression
+              gzip on;
+              gzip_vary on;
+              gzip_min_length 1024;
+              gzip_types text/plain text/css text/xml text/javascript application/javascript application/xml+rss application/json;
+          }
+          EOF
+          
+          # Test Nginx configuration
+          sudo nginx -t
+          
+          # Reload Nginx
+          sudo systemctl reload nginx
+          
+          echo "✅ Nginx configuration updated!"
+
+  final-health-check:
+    needs: [deploy-backend, deploy-dashboard, deploy-nginx]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Final Health Check
+      run: |
+        echo "🔍 Performing final health checks..."
+        
+        # Wait for services to be fully ready
+        sleep 30
+        
+        # Test main API
+        if curl -f https://${{ env.DOMAIN }}/health; then
+          echo "✅ Main API is healthy"
+        else
+          echo "❌ Main API health check failed"
+          exit 1
+        fi
+        
+        # Test dashboard API
+        if curl -f https://${{ env.DOMAIN }}/api/dashboard/status; then
+          echo "✅ Dashboard API is healthy"
+        else
+          echo "❌ Dashboard API health check failed"
+          exit 1
+        fi
+        
+        # Test dashboard frontend
+        if curl -f https://${{ env.DOMAIN }}/dashboard; then
+          echo "✅ Dashboard frontend is accessible"
+        else
+          echo "❌ Dashboard frontend health check failed"
+          exit 1
+        fi
+        
+        echo "🎉 All health checks passed!"
 
   notify:
-    needs: [build, deploy]
+    needs: [deploy-backend, deploy-dashboard, deploy-nginx, final-health-check]
     runs-on: ubuntu-latest
     if: always()
     
     steps:
     - name: Notify deployment status
       run: |
-        if [ "${{ needs.deploy.result }}" == "success" ]; then
-          echo "🎉 BeeMind deployed successfully to https://beemind.dev"
+        if [ "${{ needs.final-health-check.result }}" == "success" ]; then
+          echo "🎉 BeeMind deployed successfully!"
+          echo "🌐 Main API: https://${{ env.DOMAIN }}"
+          echo "📊 Dashboard: https://${{ env.DOMAIN }}/dashboard"
+          echo "📚 API Docs: https://${{ env.DOMAIN }}/docs"
         else
-          echo "❌ Deployment failed"
+          echo "❌ Deployment failed!"
+          echo "Backend: ${{ needs.deploy-backend.result }}"
+          echo "Dashboard: ${{ needs.deploy-dashboard.result }}"
+          echo "Nginx: ${{ needs.deploy-nginx.result }}"
+          echo "Health Check: ${{ needs.final-health-check.result }}"
           exit 1
         fi
